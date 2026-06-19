@@ -1,0 +1,2 @@
+benchmark,method,n_seeds,n_pairs,n_edges,n_non_edges,chance_f1_at_m,f1_at_m_mean,f1_at_m_std,f1_lift_over_chance_mean,chance_auc,auc_mean,auc_std,auc_lift_over_chance_mean,auc_granularity
+Sparse large,Proposed,20,90,18,72,0.2,0.508333,0.114389,0.308333,0.5,0.72936,0.044521,0.22936,0.000772
