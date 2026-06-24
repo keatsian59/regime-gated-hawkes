@@ -1,4 +1,3 @@
-````markdown
 # Identifiability and Recovery of Episodic Coordination in Switching Marked Point Processes
 # Command pipeline to reproduce results published in the paper.
 
@@ -19,6 +18,8 @@ regime-gated-hawkes/
   reviewer_upgrade_design_ablations.py
   crypto_additive_spikein_compact.py
   make_5k_events.py
+  ucdp_ged_events.py
+  screen_ucdp_ged_windows.py
 
   regime_hawkes/
     __init__.py
@@ -33,6 +34,8 @@ regime-gated-hawkes/
     run_baseline_static_hawkes.py
     modular_hmm_hawkes_baseline.py
     run_baseline_spectral.py
+    run_ucdp_ged_spikein_mp.py
+    evaluate_ucdp_ged_spikein.py
 
   data/
     raw_crcns/
@@ -40,10 +43,12 @@ regime-gated-hawkes/
     raw_crypto/
     processed_crypto/
       binance_vision/
+    raw_ucdp/
+    processed_ucdp/
 
   runs/
   paper_outputs/
-````
+```
 
 ## 1. Raw data placement
 
@@ -62,6 +67,16 @@ data/raw_crypto/binance_vision/
 
 The crypto preprocessing command below expects Binance USD-M futures aggregate-trade CSV/ZIP files for the 20 symbols used in the paper and dates 2022-11-06 through 2022-11-11.
 
+Download and place the UCDP GED export here, if reproducing the social-science experiments:
+
+```text
+data/raw_ucdp/GEDEvent_v26_1.csv
+```
+
+The UCDP scripts also support the GED API, but the paper reproduction path uses
+the downloaded public CSV export for version 26.1.
+
+
 The symbols are:
 
 ```text
@@ -79,7 +94,7 @@ conda create -n hawkes-tmlr python=3.13 -y
 conda activate hawkes-tmlr
 
 python -m pip install --upgrade pip
-pip install numpy pandas scipy matplotlib jax jaxlib tqdm
+pip install numpy pandas scipy matplotlib jax jaxlib tqdm requests openpyxl pyarrow
 ```
 
 Set conservative thread limits:
@@ -99,6 +114,8 @@ New-Item -ItemType Directory -Force -Path data/raw_crcns | Out-Null
 New-Item -ItemType Directory -Force -Path data/processed_crcns | Out-Null
 New-Item -ItemType Directory -Force -Path data/raw_crypto/binance_vision | Out-Null
 New-Item -ItemType Directory -Force -Path data/processed_crypto/binance_vision | Out-Null
+New-Item -ItemType Directory -Force -Path data/raw_ucdp | Out-Null
+New-Item -ItemType Directory -Force -Path data/processed_ucdp | Out-Null
 New-Item -ItemType Directory -Force -Path runs | Out-Null
 New-Item -ItemType Directory -Force -Path paper_outputs | Out-Null
 ```
@@ -111,6 +128,8 @@ import numpy, pandas, scipy, matplotlib
 import reviewer_upgrade_experiments
 import reviewer_upgrade_crcns_hc_advisor_mp_SAFE
 import reviewer_upgrade_design_ablations
+import ucdp_ged_events
+import screen_ucdp_ged_windows
 from regime_hawkes.em import run_em
 from regime_hawkes.estep import run_estep
 print("imports ok")
@@ -1125,7 +1144,18 @@ runs/
   ftx_spikein_compact_cap5k_s5_proposed_iter4_rhoFull/
     crcns_baseline_raw.csv
     crcns_baseline_summary.csv
-````
+
+  ucdp_ged_india_volume_neutral_p1_s20/
+    ucdp_ged_spikein_raw_checkpoint.csv
+    ucdp_ged_spikein_theorem_summary.csv
+    ucdp_p1_exposure_table.tex
+    ucdp_theorem_paired_deltas.csv
+
+  ucdp_ged_india_weaklink_p2_diag_s20/
+    ucdp_ged_spikein_raw_checkpoint.csv
+    ucdp_p2_threshold_points.csv
+    ucdp_p2_slope_fit.csv
+```
 
 The following outputs are intentionally not cached by default and can be
 regenerated directly from the commands in this README:
@@ -1135,6 +1165,8 @@ runs/synthetic_base_k10_iter30_s20/
 runs/synthetic_scaled_k20_iter30_s20/
 runs/design_ablations_base_k10_iter30_s20/
 runs/design_ablations_scaled_k20_iter30_s20/
+runs/b4_base_synthetic/
+runs/ucdp_ged_india_coarsening_diag_s20/
 ```
 
 These synthetic and design-ablation results are simulated from fixed seeds by
@@ -1142,14 +1174,248 @@ the reproduction scripts and do not require external data files.
 
 
 
-## 22. Replication-count note
+## 22. UCDP GED social-science data prep and theorem-facing tests
 
-The synthetic and CA1 spike-in recovery experiments use 20 seeds. The raw CA1 held-out predictive likelihood comparison uses the completed paired predictive seed set, `n=14`, due to compute time. The FTX peak predictive comparison uses `n=7`. The financial mark-channel recovery uses 5 spike-in seeds and full nuisance updates for rho estimation.
+The UCDP GED experiments use a real conflict-event background and inject a
+volume-neutral planted coordination signal. The paper uses the exact-day GED
+subset, streams by dyad, and the India 2007--2011 window with `K=8` streams and
+`k=4` planted actors.
+
+### 22.1 Prepare the UCDP GED event table
+
+```powershell
+python ucdp_ged_events.py `
+  --ged-csv data/raw_ucdp/GEDEvent_v26_1.csv `
+  --stream-by dyad `
+  --violence-types 1 `
+  --exact-dates-only `
+  --out-prefix data/processed_ucdp/ucdp_ged_dyad_exact_v26_1
+```
+
+Expected outputs:
+
+```text
+data/processed_ucdp/ucdp_ged_dyad_exact_v26_1_events.csv
+data/processed_ucdp/ucdp_ged_dyad_exact_v26_1_streams.npz
+data/processed_ucdp/ucdp_ged_dyad_exact_v26_1_streams_index.json
+```
+
+### 22.2 Screen candidate windows
+
+This command is a convenience screen for dense dyad windows. The paper run below
+also pins the India window explicitly, so the screen is useful for verification
+rather than required for the deterministic reproduction path.
+
+```powershell
+python screen_ucdp_ged_windows.py `
+  --events data/processed_ucdp/ucdp_ged_dyad_exact_v26_1_events.csv `
+  --group-by country `
+  --country India `
+  --window-years 5 `
+  --step-years 1 `
+  --top-k 8 `
+  --min-events 400 `
+  --min-topk-events 200 `
+  --min-streams 8 `
+  --out data/processed_ucdp/ucdp_ged_india_candidate_windows.csv
+```
+
+### 22.3 UCDP P1 volume-neutral exposure sweep
+
+This is the real social-science exposure experiment reported in the paper. It
+holds the original planted-member background count fixed while realized planted
+active-born exposure varies from approximately 25 to 200 events.
+
+```powershell
+python -m regime_hawkes.run_ucdp_ged_spikein_mp `
+  --events data/processed_ucdp/ucdp_ged_dyad_exact_v26_1_events.csv `
+  --country India `
+  --window-start 2007-01-01 `
+  --window-end 2012-01-01 `
+  --top-k 8 `
+  --subgroup-size 4 `
+  --source-actor 0 `
+  --subgroup-mode random `
+  --volume-mode neutral `
+  --mark-mode fatality_bin `
+  --injection-strengths 0.5 1.0 2.0 3.0 4.0 `
+  --base-injected-events 50 `
+  --coarsen-days 0.0 `
+  --seeds 20 `
+  --seed-start 0 `
+  --workers 8 `
+  --methods proposed,b1 `
+  --interval-width 7 `
+  --jitter 0.05 `
+  --n-episodes 4 `
+  --episode-length 21 `
+  --max-iters 30 `
+  --n-inner-steps 10 `
+  --outdir runs/ucdp_ged_india_volume_neutral_p1_s20
+```
+
+Evaluate the UCDP P1 run and write the paper-ready CSV/LaTeX summaries:
+
+```powershell
+python -m regime_hawkes.evaluate_ucdp_ged_spikein `
+  --raw runs/ucdp_ged_india_volume_neutral_p1_s20/ucdp_ged_spikein_raw_checkpoint.csv `
+  --outdir runs/ucdp_ged_india_volume_neutral_p1_s20 `
+  --headline-strength 4.0 `
+  --n-boot 2000
+```
+
+Expected outputs:
+
+```text
+runs/ucdp_ged_india_volume_neutral_p1_s20/ucdp_ged_spikein_raw_checkpoint.csv
+runs/ucdp_ged_india_volume_neutral_p1_s20/ucdp_ged_spikein_theorem_summary.csv
+runs/ucdp_ged_india_volume_neutral_p1_s20/ucdp_p1_exposure_table.tex
+runs/ucdp_ged_india_volume_neutral_p1_s20/ucdp_theorem_paired_deltas.csv
+```
+
+### 22.4 UCDP weak-link diagnostic stress test
+
+This real-background diagnostic varies one designated receiver's injected share
+while redistributing the freed mass to the other receivers. It is retained as a
+stress test; the paper's theorem-facing weakest-link coordinate is the synthetic
+true-`alpha_min` sweep.
+
+```powershell
+python -m regime_hawkes.run_ucdp_ged_spikein_mp `
+  --events data/processed_ucdp/ucdp_ged_dyad_exact_v26_1_events.csv `
+  --country India `
+  --window-start 2007-01-01 `
+  --window-end 2012-01-01 `
+  --top-k 8 `
+  --subgroup-size 4 `
+  --source-actor 0 `
+  --subgroup-mode random `
+  --volume-mode neutral `
+  --mark-mode fatality_bin `
+  --injection-strengths 1.0 `
+  --base-injected-events 150 `
+  --coarsen-days 0.0 `
+  --weak-receiver-fracs 1.0 0.75 0.50 0.35 0.25 `
+  --episode-lengths 7 14 21 35 56 `
+  --seeds 20 `
+  --seed-start 0 `
+  --workers 8 `
+  --methods proposed `
+  --interval-width 7 `
+  --jitter 0.05 `
+  --n-episodes 4 `
+  --max-iters 30 `
+  --n-inner-steps 10 `
+  --outdir runs/ucdp_ged_india_weaklink_p2_diag_s20
+```
+
+Evaluate the diagnostic:
+
+```powershell
+python -m regime_hawkes.evaluate_ucdp_ged_spikein `
+  --raw runs/ucdp_ged_india_weaklink_p2_diag_s20/ucdp_ged_spikein_raw_checkpoint.csv `
+  --outdir runs/ucdp_ged_india_weaklink_p2_diag_s20 `
+  --n-boot 2000
+```
+
+Expected P2 diagnostic outputs:
+
+```text
+runs/ucdp_ged_india_weaklink_p2_diag_s20/ucdp_p2_threshold_points.csv
+runs/ucdp_ged_india_weaklink_p2_diag_s20/ucdp_p2_slope_fit.csv
+```
+
+### 22.5 Optional UCDP temporal-coarsening diagnostic
+
+This diagnostic admits coarser GED date uncertainty levels to stress the
+posterior/temporal-localization bridge. It is not used as a theorem-clean P3
+claim because the hard-path posterior gap changes with exposure and date
+coarsening.
+
+```powershell
+python -m regime_hawkes.run_ucdp_ged_spikein_mp `
+  --events data/processed_ucdp/ucdp_ged_dyad_exact_v26_1_events.csv `
+  --country India `
+  --window-start 2007-01-01 `
+  --window-end 2012-01-01 `
+  --top-k 8 `
+  --subgroup-size 4 `
+  --source-actor 0 `
+  --subgroup-mode random `
+  --volume-mode neutral `
+  --mark-mode fatality_bin `
+  --injection-strengths 1.0 `
+  --base-injected-events 150 `
+  --coarsen-days 0.0 1.0 3.0 7.0 14.0 `
+  --seeds 20 `
+  --seed-start 0 `
+  --workers 8 `
+  --methods proposed `
+  --interval-width 7 `
+  --jitter 0.05 `
+  --n-episodes 4 `
+  --episode-length 21 `
+  --max-iters 30 `
+  --n-inner-steps 10 `
+  --outdir runs/ucdp_ged_india_coarsening_diag_s20
+
+python -m regime_hawkes.evaluate_ucdp_ged_spikein `
+  --raw runs/ucdp_ged_india_coarsening_diag_s20/ucdp_ged_spikein_raw_checkpoint.csv `
+  --outdir runs/ucdp_ged_india_coarsening_diag_s20 `
+  --n-boot 2000
+```
+
+## 23. External B4 change-point Hawkes baseline on the base synthetic benchmark
+
+The external B4 baseline is a change-point Hawkes pipeline: segment first, then
+fit a static Hawkes model inside the selected active segment. The base synthetic
+run below uses the same K=10 configuration as Section 10, but selects only B4
+and writes to the run folder used in the paper package.
+
+```powershell
+@'
+from pathlib import Path
+from regime_hawkes.config import SimConfig
+from reviewer_upgrade_experiments import run_replications, parse_method_selection
+
+cfg = SimConfig(
+    K=10,
+    M=2,
+    T=500.0,
+    ring_actors=[0, 1, 2],
+    hub_actor=0,
+    d=3,
+    nu_base=0.15,
+    alpha0_team=0.01,
+    alpha1_max=0.8,
+    alpha1_min=0.35,
+    beta0=1.0,
+    beta1=3.0,
+    eta_on=0.06,
+    eta_off=0.3,
+    seed=7,
+)
+
+run_replications(
+    cfg,
+    seeds=list(range(7, 27)),
+    outdir=Path("runs/b4_base_synthetic"),
+    method="topk",
+    methods=parse_method_selection("b4"),
+    max_iters=30,
+)
+'@ | python -
+```
+
+
+## 24. Replication-count note
+
+The synthetic and CA1 spike-in recovery experiments use 20 seeds. The UCDP GED volume-neutral exposure and weak-link diagnostic runs use 20 seeds. The raw CA1 held-out predictive likelihood comparison uses the completed paired predictive seed set, `n=14`, due to compute time. The FTX peak predictive comparison uses `n=7`. The financial mark-channel recovery uses 5 spike-in seeds and full nuisance updates for rho estimation.
 
 
 
 
-## Powered sparse directed-edge diagnostic
+## 25. Powered sparse directed-edge diagnostic
 
 This port includes the powered sparse directed-edge experiment added after the original repository snapshot. It is documented in `SPARSE_DIRECTED_DIAGNOSTIC.md`. The main commands are:
 
