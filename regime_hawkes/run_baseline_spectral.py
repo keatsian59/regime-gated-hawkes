@@ -37,28 +37,21 @@ def _compute_static_loglik(
     coordinate ascent rather than being fixed at an arbitrary value.
     """
     K = A.shape[0]
-    N = len(actors)
+    actors = np.asarray(actors, dtype=int)
+    marks = np.asarray(marks, dtype=int)
 
-    lam_at_events = np.zeros(N)
-    for n in range(N):
-        i_n, m_n = actors[n], marks[n]
-        trig = 0.0
-        for j in range(K):
-            for mp in range(pre_traces.shape[2]):
-                trig += A[j, i_n] * pre_traces[n, j, mp] * rho[mp, m_n]
-        lam_at_events[n] = max(nu[i_n, m_n] + trig, eps)
+    # lam_n = nu[i_n,m_n] + sum_j A[j,i_n] * sum_mp pre_traces[n,j,mp]*rho[mp,m_n].
+    # Vectorized replacement for the per-event N*K*M Python loop (identical math).
+    R = np.einsum("njm,mn->nj", pre_traces, rho[:, marks])      # (N, K) trigger features
+    trig = np.einsum("nj,jn->n", R, A[:, actors])              # (N,)
+    lam_at_events = np.maximum(nu[actors, marks] + trig, eps)
 
-    ll = np.sum(np.log(lam_at_events)) - np.sum(nu) * T
     rho_sum = float(np.sum(rho))
-    for j in range(K):
-        n_j = np.sum(actors == j)
-        for i in range(K):
-            if j == i:
-                continue
-            ll -= A[j, i] * rho_sum * n_j / beta
-
-    # Penalized objective used for beta selection.
-    ll -= l1_penalty * np.sum(A)
+    actor_counts = np.bincount(actors, minlength=K).astype(float)
+    offdiag_rowsum = A.sum(axis=1) - np.diag(A)                 # sum_{i != j} A[j, i]
+    ll = (np.sum(np.log(lam_at_events)) - np.sum(nu) * T
+          - rho_sum / beta * float(actor_counts @ offdiag_rowsum)
+          - l1_penalty * np.sum(A))
     return float(ll), lam_at_events
 
 
@@ -160,29 +153,22 @@ def _fit_static_hawkes_full_matrix(
             eps=eps,
         )
 
-        # Gradient for nu: sum of 1/lambda * indicator - T
+        # Vectorized gradients (identical math to the per-event loops).
+        rho_sum = float(np.sum(rho))
+        R = np.einsum("njm,mn->nj", pre_traces, rho[:, marks])   # (N, K)
+        inv_lam = 1.0 / lam_at_events
+
         grad_nu = np.zeros_like(nu)
-        for n in range(N):
-            i_n, m_n = actors[n], marks[n]
-            grad_nu[i_n, m_n] += 1.0 / lam_at_events[n]
+        np.add.at(grad_nu, (actors, marks), inv_lam)
         grad_nu -= T  # exact gradient of the -sum(nu) * T compensator
 
-        # Gradient for A[j,i]: sum over events at i of (trace contribution / lambda) - compensator
-        grad_A = np.zeros_like(A)
-        rho_sum = float(np.sum(rho))
-        for n in range(N):
-            i_n, m_n = actors[n], marks[n]
-            for j in range(K):
-                if j == i_n:
-                    continue
-                feat = sum(pre_traces[n, j, mp] * rho[mp, m_n] for mp in range(M))
-                grad_A[j, i_n] += feat / lam_at_events[n]
-
-        for j in range(K):
-            for i in range(K):
-                if j == i:
-                    continue
-                grad_A[j, i] -= rho_sum * actor_counts[j] / beta
+        W = R * inv_lam[:, None]                                 # (N, K)
+        grad_A_T = np.zeros((K, K))                              # grad_A_T[i, j] == grad_A[j, i]
+        np.add.at(grad_A_T, actors, W)                           # accumulate by receiver i_n
+        grad_A = grad_A_T.T.copy()
+        np.fill_diagonal(grad_A, 0.0)                            # data term excludes j == i_n
+        grad_A -= (rho_sum / beta) * actor_counts[:, None]       # compensator, all i != j
+        np.fill_diagonal(grad_A, 0.0)
 
         # L1 proximal step on A
         A_plus = A + lr * grad_A
