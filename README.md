@@ -6,7 +6,11 @@ This README gives the commands used to regenerate the processed experiment files
 **Identifiability and Recovery of Episodic Coordination in Switching Marked Point Processes**
 
 The repository does **not** commit derived experiment data. The reviewer should place the raw/public data archives in the locations below, then run the commands in order. All processed event files, manifests, spike-ins, and results are generated locally.
-
+For readers who want a conceptual map of the empirical design, this repository
+also includes `ARCHITECTURE.md`. That file explains how the experiments map to
+the paper's theorem-facing predictions: active exposure, weakest-link scaling,
+posterior accuracy, and separability/collapse. It is intended as a guide to the
+empirical method rather than as an additional result.
 ## 0. Repository layout
 
 All reproduction scripts live at the repository root.
